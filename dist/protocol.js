@@ -46,7 +46,7 @@ export class JsonRpcProcess extends EventEmitter {
         const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
         lines.on("line", (line) => this.receiveLine(line));
         await this.request("initialize", {
-            clientInfo: { name: "omachatgpt", title: "Quick Chat", version: "0.2.1" },
+            clientInfo: { name: "omachatgpt", title: "OmachatGPT", version: "0.2.2" },
             capabilities: { experimentalApi: true },
         });
         this.notify("initialized", {});

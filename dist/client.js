@@ -82,7 +82,7 @@ export class ChatClient extends EventEmitter {
         this.threadId = response.thread.id;
         this.turnId = null;
         await saveState(response.thread.id);
-        void this.rpc.request("thread/name/set", { threadId: response.thread.id, name: "Quick Chat" }).catch(() => undefined);
+        void this.rpc.request("thread/name/set", { threadId: response.thread.id, name: "OmachatGPT" }).catch(() => undefined);
         return { threadId: response.thread.id, messages: [], resumed: false };
     }
     async send(text) {

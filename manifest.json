@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "dpellerin.omachatgpt",
   "name": "OmachatGPT",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "Dana Pellerin",
   "license": "MIT",
   "description": "A focused conversational ChatGPT panel with resumable history and live web search.",

@@ -1,10 +1,10 @@
 # OmachatGPT
 
-![Quick Chat panel preview](preview.png)
+![OmachatGPT panel preview](preview.png)
 
-OmachatGPT is a small, keyboard-first ChatGPT panel for Omarchy. The interface
-is labeled **Quick Chat**: summon it, ask a question, and return to what you were
-doing without opening a browser or a full coding-agent interface.
+OmachatGPT is a small, keyboard-first ChatGPT panel for Omarchy: summon it, ask
+a question, and return to what you were doing without opening a browser or a
+full coding-agent interface.
 
 It uses the locally installed Codex CLI and the ChatGPT account already
 authenticated by `codex login`. It does not require an OpenAI API key and has no
@@ -95,7 +95,7 @@ enabling it. Marketplace validation is not a security audit.
 | `Panel.qml` | Renders the Quattro panel | Runs inside `omarchy-shell`, as do all shell plugins. |
 | `codex app-server --stdio` | Provides authenticated conversation streaming and live web search | Runs as a child process with a private temporary working directory, read-only sandbox, approvals disabled, MCP cleared, and local-action features disabled. |
 | `omarchy-launch-browser` | Opens assistant links after an explicit click | Receives only validated `http` or `https` URLs. |
-| `$XDG_STATE_HOME/omachatgpt/state.json` | Resumes the most recent Quick Chat | Stores only the Codex thread ID, selected model, and update timestamp with owner-only permissions. |
+| `$XDG_STATE_HOME/omachatgpt/state.json` | Resumes the most recent OmachatGPT chat | Stores only the Codex thread ID, selected model, and update timestamp with owner-only permissions. |
 
 The repository has no runtime npm dependencies. Its external requirements are
 Omarchy/Quattro, Node.js, a current Codex CLI, and a ChatGPT-authenticated Codex

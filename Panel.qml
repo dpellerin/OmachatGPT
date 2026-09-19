@@ -443,7 +443,7 @@ Item {
           Text {
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
-            text: "Quick Chat"
+            text: "OmachatGPT"
             color: root.accent
             font.family: Style.font.family
             font.pixelSize: Style.font.title
@@ -653,7 +653,7 @@ Item {
             anchors.centerIn: parent
             width: parent.width - Style.space(36)
             visible: conversation.count === 0 && root.connected
-            text: "What’s on your mind?\n\nYour Quick Chat resumes when you reopen it."
+            text: "What’s on your mind?\n\nYour OmachatGPT chat resumes when you reopen it."
             color: root.dim
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
