@@ -2,6 +2,11 @@
 
 All notable changes to OmachatGPT are documented here.
 
+## 0.2.1 - 2026-09-19
+
+- Fix hosted CI setup ordering so pnpm is available before dependency-cache
+  configuration.
+
 ## 0.2.0 - 2026-09-19
 
 - Initial public release of the Quick Chat Omarchy panel.
