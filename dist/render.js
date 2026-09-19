@@ -1,0 +1,234 @@
+const SYMBOLS = {
+    alpha: "α", beta: "β", gamma: "γ", delta: "δ", epsilon: "ε", theta: "θ",
+    lambda: "λ", mu: "μ", pi: "π", rho: "ρ", sigma: "σ", tau: "τ", phi: "φ",
+    psi: "ψ", omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ",
+    Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
+    times: "×", cdot: "·", div: "÷", pm: "±", mp: "∓", neq: "≠", approx: "≈",
+    equiv: "≡", le: "≤", leq: "≤", ge: "≥", geq: "≥", in: "∈", notin: "∉",
+    subset: "⊂", subseteq: "⊆", supset: "⊃", supseteq: "⊇", cup: "∪", cap: "∩",
+    infinity: "∞", infty: "∞", partial: "∂", nabla: "∇", sum: "∑", prod: "∏",
+    int: "∫", oint: "∮", forall: "∀", exists: "∃", neg: "¬", land: "∧", lor: "∨",
+    to: "→", rightarrow: "→", leftarrow: "←", leftrightarrow: "↔", implies: "⇒",
+    therefore: "∴", because: "∵", degree: "°", angle: "∠", perp: "⊥",
+};
+const SUPERSCRIPT = {
+    "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵",
+    "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻",
+    "=": "⁼", "(": "⁽", ")": "⁾", n: "ⁿ", i: "ⁱ",
+};
+const SUBSCRIPT = {
+    "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅",
+    "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋",
+    "=": "₌", "(": "₍", ")": "₎", a: "ₐ", e: "ₑ", h: "ₕ", i: "ᵢ",
+    j: "ⱼ", k: "ₖ", l: "ₗ", m: "ₘ", n: "ₙ", o: "ₒ", p: "ₚ", r: "ᵣ",
+    s: "ₛ", t: "ₜ", u: "ᵤ", v: "ᵥ", x: "ₓ",
+};
+function sourceFromResult(value) {
+    if (!value || typeof value !== "object")
+        return null;
+    const result = value;
+    if (typeof result.ref_id !== "string" || typeof result.url !== "string")
+        return null;
+    if (!/^https?:\/\//i.test(result.url))
+        return null;
+    const fallback = typeof result.domain === "string" ? result.domain : "source";
+    return {
+        refId: result.ref_id,
+        url: result.url,
+        title: typeof result.title === "string" && result.title.trim() ? result.title.trim() : fallback,
+    };
+}
+export function citationSourcesFromResults(results) {
+    if (!Array.isArray(results))
+        return [];
+    return results.map(sourceFromResult).filter((source) => source !== null);
+}
+function markdownUrl(url) {
+    return url.replace(/\(/g, "%28").replace(/\)/g, "%29").replace(/\s/g, "%20");
+}
+function citationLabel(title) {
+    const clean = title.replace(/[\[\]\n\r]+/g, " ").replace(/\s+/g, " ").trim();
+    return clean.length > 46 ? `${clean.slice(0, 43).trimEnd()}…` : (clean || "source");
+}
+export function resolveCitations(text, sources) {
+    const byId = new Map(Array.from(sources, (source) => [source.refId, source]));
+    return text.replace(/\uE200cite(?:\uE202[^\uE201]*)?\uE201/g, (marker) => {
+        const refs = Array.from(marker.matchAll(/turn\d+(?:search|view)\d+/g), (match) => match[0]);
+        const resolved = refs.map((ref) => byId.get(ref)).filter((source) => Boolean(source));
+        if (!resolved.length)
+            return "";
+        if (resolved.length === 1) {
+            const source = resolved[0];
+            return `[${citationLabel(source.title)}](${markdownUrl(source.url)})`;
+        }
+        return resolved.map((source, index) => `[${index + 1}](${markdownUrl(source.url)})`).join(" ");
+    }).replace(/[ \t]+\n/g, "\n").replace(/ {2,}/g, " ").trimEnd();
+}
+export class StreamingCitationResolver {
+    tail = "";
+    reset() {
+        this.tail = "";
+    }
+    push(delta, sources) {
+        let input = this.tail + delta;
+        this.tail = "";
+        let output = "";
+        while (input) {
+            const start = input.indexOf("\uE200");
+            if (start < 0)
+                return output + input;
+            output += input.slice(0, start);
+            const end = input.indexOf("\uE201", start + 1);
+            if (end < 0) {
+                this.tail = input.slice(start);
+                return output;
+            }
+            const marker = input.slice(start, end + 1);
+            output += resolveCitations(marker, sources);
+            input = input.slice(end + 1);
+        }
+        return output;
+    }
+}
+export class StreamingLinkResolver {
+    tail = "";
+    reset() {
+        this.tail = "";
+    }
+    push(delta) {
+        let input = this.tail + delta;
+        this.tail = "";
+        let output = "";
+        while (input) {
+            const bracket = input.indexOf("[");
+            if (bracket < 0)
+                return output + input;
+            const start = bracket > 0 && input[bracket - 1] === "!" ? bracket - 1 : bracket;
+            output += input.slice(0, start);
+            const labelEnd = input.indexOf("]", bracket + 1);
+            if (labelEnd < 0 || labelEnd + 1 >= input.length) {
+                this.tail = input.slice(start);
+                return output;
+            }
+            if (input[labelEnd + 1] !== "(") {
+                output += input.slice(start, labelEnd + 1);
+                input = input.slice(labelEnd + 1);
+                continue;
+            }
+            let depth = 0;
+            let linkEnd = -1;
+            for (let index = labelEnd + 1; index < input.length; index++) {
+                if (input[index] === "(")
+                    depth++;
+                else if (input[index] === ")" && --depth === 0) {
+                    linkEnd = index;
+                    break;
+                }
+            }
+            if (linkEnd < 0) {
+                this.tail = input.slice(start);
+                return output;
+            }
+            const label = input.slice(bracket + 1, labelEnd);
+            const url = input.slice(labelEnd + 2, linkEnd).trim();
+            output += /^https?:\/\//i.test(url)
+                ? `[${label}](${url})`
+                : input.slice(start, linkEnd + 1);
+            input = input.slice(linkEnd + 1);
+        }
+        return output;
+    }
+}
+function readGroup(input, start) {
+    if (input[start] !== "{")
+        return null;
+    let depth = 0;
+    for (let index = start; index < input.length; index++) {
+        if (input[index] === "{")
+            depth++;
+        else if (input[index] === "}" && --depth === 0)
+            return { value: input.slice(start + 1, index), end: index + 1 };
+    }
+    return null;
+}
+function replaceGroupedCommand(input, command, groups, render) {
+    let output = "";
+    let cursor = 0;
+    const needle = `\\${command}`;
+    while (cursor < input.length) {
+        const found = input.indexOf(needle, cursor);
+        if (found < 0)
+            return output + input.slice(cursor);
+        output += input.slice(cursor, found);
+        let position = found + needle.length;
+        while (input[position] === " ")
+            position++;
+        const values = [];
+        for (let index = 0; index < groups; index++) {
+            const group = readGroup(input, position);
+            if (!group)
+                break;
+            values.push(group.value);
+            position = group.end;
+            while (input[position] === " ")
+                position++;
+        }
+        if (values.length !== groups) {
+            output += needle;
+            cursor = found + needle.length;
+        }
+        else {
+            output += render(values);
+            cursor = position;
+        }
+    }
+    return output;
+}
+function scriptValue(value, alphabet, fallback) {
+    const converted = Array.from(value).map((character) => alphabet[character]).join("");
+    return converted.length === value.length ? converted : `${fallback}(${value})`;
+}
+export function formatLatex(input) {
+    let value = input.trim();
+    for (let pass = 0; pass < 4; pass++) {
+        value = replaceGroupedCommand(value, "frac", 2, ([top, bottom]) => `(${formatLatex(top)})/(${formatLatex(bottom)})`);
+        value = replaceGroupedCommand(value, "sqrt", 1, ([inside]) => `√(${formatLatex(inside)})`);
+        value = replaceGroupedCommand(value, "text", 1, ([inside]) => inside);
+        value = replaceGroupedCommand(value, "operatorname", 1, ([inside]) => inside);
+    }
+    value = value
+        .replace(/\\begin\{(?:aligned\*?|equation\*?|gathered|matrix|pmatrix|bmatrix)\}/g, "")
+        .replace(/\\end\{(?:aligned\*?|equation\*?|gathered|matrix|pmatrix|bmatrix)\}/g, "")
+        .replace(/\\(?:left|right|displaystyle)\b/g, "")
+        .replace(/\\(?:quad|qquad|,|;|!|:)\s*/g, " ")
+        .replace(/\\\\/g, "\n")
+        .replace(/&/g, "")
+        .replace(/\\([A-Za-z]+)/g, (match, name) => SYMBOLS[name] || name)
+        .replace(/\^\{([^{}]+)\}/g, (_, script) => scriptValue(script, SUPERSCRIPT, "^"))
+        .replace(/_\{([^{}]+)\}/g, (_, script) => scriptValue(script, SUBSCRIPT, "_"))
+        .replace(/\^([0-9+\-=()ni])/g, (_, script) => SUPERSCRIPT[script] || `^${script}`)
+        .replace(/_([0-9+\-=()aehijklmnoprstuvx])/g, (_, script) => SUBSCRIPT[script] || `_${script}`)
+        .replace(/[{}]/g, "")
+        .replace(/~/g, " ")
+        .replace(/[ \t]+/g, " ")
+        .replace(/\s*([=+×÷±≤≥≠≈→])\s*/g, " $1 ")
+        .trim();
+    return value;
+}
+function mathFence(expression) {
+    return `\n\n\`\`\`math\n${formatLatex(expression)}\n\`\`\`\n\n`;
+}
+export function normalizeMath(markdown) {
+    let value = markdown
+        .replace(/\$\$([\s\S]*?)\$\$/g, (_, expression) => mathFence(expression))
+        .replace(/\\\[([\s\S]*?)\\\]/g, (_, expression) => mathFence(expression))
+        .replace(/\\begin\{equation\*?\}([\s\S]*?)\\end\{equation\*?\}/g, (_, expression) => mathFence(expression))
+        .replace(/\\\(([\s\S]*?)\\\)/g, (_, expression) => formatLatex(expression));
+    value = value.replace(/\$([^$\n]+)\$/g, (whole, expression) => {
+        return /\\[A-Za-z]+|[=^_+*/<>]|^[A-Za-z]$/.test(expression) ? formatLatex(expression) : whole;
+    });
+    return value.replace(/\n{3,}/g, "\n\n").trim();
+}
+export function normalizeAssistantText(text, sources = []) {
+    return normalizeMath(resolveCitations(String(text || "").replace(/\r\n?/g, "\n"), sources));
+}

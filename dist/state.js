@@ -1,0 +1,74 @@
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { citationSourcesFromResults, normalizeAssistantText } from "./render.js";
+export const MODEL = "gpt-5.6-luna";
+export const STATE_VERSION = 3;
+export function statePath(env = process.env) {
+    const root = env.XDG_STATE_HOME || join(homedir(), ".local", "state");
+    return join(root, "omachatgpt", "state.json");
+}
+export async function loadState(path = statePath()) {
+    try {
+        const parsed = JSON.parse(await readFile(path, "utf8"));
+        if (parsed.version !== STATE_VERSION || typeof parsed.threadId !== "string" || !parsed.threadId)
+            return null;
+        if (parsed.model !== MODEL || typeof parsed.updatedAt !== "string")
+            return null;
+        return parsed;
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return null;
+        return null;
+    }
+}
+export async function saveState(threadId, path = statePath()) {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    const temporary = `${path}.${process.pid}.tmp`;
+    const data = {
+        version: STATE_VERSION,
+        threadId,
+        model: MODEL,
+        updatedAt: new Date().toISOString(),
+    };
+    await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+    await chmod(temporary, 0o600);
+    await rename(temporary, path);
+    await chmod(path, 0o600);
+}
+function itemToMessage(item, sources = []) {
+    if (item.type === "userMessage") {
+        const text = (item.content || [])
+            .filter((part) => part.type === "text" && typeof part.text === "string")
+            .map((part) => part.text)
+            .join("\n");
+        return text ? { id: item.id, role: "user", text } : null;
+    }
+    if (item.type === "agentMessage" && item.phase !== "commentary" && item.text) {
+        return { id: item.id, role: "assistant", text: normalizeAssistantText(item.text, sources) };
+    }
+    return null;
+}
+export function messagesFromTurns(turns) {
+    return turns.flatMap((turn) => {
+        const sources = turn.items.flatMap((item) => item.type === "webSearch" ? citationSourcesFromResults(item.results) : []);
+        return turn.items.map((item) => itemToMessage(item, sources)).filter((item) => item !== null);
+    });
+}
+export function friendlyError(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/unauthorized|not logged in|authentication/i.test(message)) {
+        return "ChatGPT sign-in is required. Run `codex login` in a regular terminal, then reopen this popup.";
+    }
+    if (/usageLimitExceeded|rate.?limit|quota|usage limit/i.test(message)) {
+        return "Your Codex usage limit has been reached. Try again after the allowance resets.";
+    }
+    if (/ENOENT.*codex|spawn codex ENOENT/i.test(message)) {
+        return "Codex is not installed or is not on PATH. Update Omarchy, then reopen this popup.";
+    }
+    if (/model.*unavailable|gpt-5\.6-luna/i.test(message)) {
+        return "GPT-5.6 Luna is not available to this account. Update Codex or review the available models.";
+    }
+    return message.replace(/\s+/g, " ").trim() || "Something went wrong.";
+}

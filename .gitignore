@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+coverage/
+.env
+.env.*
+!.env.example
+.pnpm-debug.log*
+*.tmp
+*.swp

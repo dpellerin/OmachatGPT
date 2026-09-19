@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -euo pipefail
+
+stage_dir=$(mktemp -d /tmp/omachatgpt-plugin.XXXXXX)
+trap 'rm -rf -- "$stage_dir"' EXIT
+
+rsync -a \
+  --exclude .git \
+  --exclude node_modules \
+  --exclude '*.log' \
+  ./ "$stage_dir/"
+
+omarchy plugin validate "$stage_dir"

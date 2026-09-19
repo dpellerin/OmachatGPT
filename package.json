@@ -1,0 +1,24 @@
+{
+  "name": "omachatgpt",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "smoke": "node scripts/smoke.mjs",
+    "start": "node dist/bridge.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "validate:plugin": "bash scripts/validate-plugin",
+    "verify": "pnpm test && pnpm check && pnpm build && pnpm validate:plugin"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3"
+  },
+  "packageManager": "pnpm@10.29.2"
+}

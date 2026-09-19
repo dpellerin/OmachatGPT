@@ -1,0 +1,25 @@
+name: Bug report
+description: Report a reproducible OmachatGPT problem.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Do not report security vulnerabilities here; see SECURITY.md."
+  - type: input
+    id: versions
+    attributes:
+      label: Omarchy and Codex CLI versions
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
