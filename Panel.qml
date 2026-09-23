@@ -14,8 +14,12 @@ Item {
   property bool opened: false
   property bool connected: false
   property bool thinking: false
+  property bool modelChangePending: false
   property bool expectedStop: false
   property string notice: "Connecting to ChatGPT…"
+  property string modelIndicator: ""
+  property string selectedModel: ""
+  property var availableModels: []
   property string streamingId: ""
   property string noticeBeforeCopy: ""
   property double backendStartedAt: 0
@@ -74,7 +78,11 @@ Item {
     root.expectedStop = false
     root.connected = false
     root.thinking = false
+    root.modelChangePending = false
     root.notice = "Connecting to ChatGPT…"
+    root.modelIndicator = ""
+    root.selectedModel = ""
+    root.availableModels = []
     root.backendStartedAt = Date.now()
     root.coldStarts++
     backend.command = ["node", root.bridgePath]
@@ -106,6 +114,30 @@ Item {
     if (backend.running) backend.write(JSON.stringify(command) + "\n")
   }
 
+  function displayModelName(model) {
+    var parts = String(model || "").split("-")
+    if (parts.length === 0 || parts[0] === "") return ""
+    var label = parts[0].toLowerCase() === "gpt" && parts.length > 1
+      ? "GPT-" + parts[1]
+      : parts[0]
+    var start = parts[0].toLowerCase() === "gpt" ? 2 : 1
+    for (var i = start; i < parts.length; i++) {
+      label += " " + parts[i].charAt(0).toUpperCase() + parts[i].slice(1)
+    }
+    return label
+  }
+
+  function updateModelSelection(model) {
+    root.selectedModel = String(model || "")
+    root.modelIndicator = root.displayModelName(model)
+    for (var i = 0; i < root.availableModels.length; i++) {
+      if (root.availableModels[i].model === model) {
+        modelChooser.currentIndex = i
+        break
+      }
+    }
+  }
+
   function copyToClipboard(value, label) {
     var text = String(value || "")
     if (text === "") return
@@ -117,7 +149,7 @@ Item {
 
   function sendMessage() {
     var text = prompt.text.trim()
-    if (!text || !root.connected || root.thinking) return
+    if (!text || !root.connected || root.thinking || root.modelChangePending) return
     prompt.text = ""
     conversation.append({ messageId: "user-" + Date.now(), messageRole: "user", body: text, messageFinal: true })
     root.streamingId = ""
@@ -128,7 +160,7 @@ Item {
   }
 
   function newChat() {
-    if (!root.connected || root.thinking) return
+    if (!root.connected || root.thinking || root.modelChangePending) return
     root.connected = false
     root.notice = "Starting a new chat…"
     root.sendCommand({ type: "newChat" })
@@ -331,8 +363,17 @@ Item {
       root.replaceMessages(event.messages || [])
       root.connected = true
       root.thinking = false
+      root.modelChangePending = false
       root.notice = event.notice || "Ready"
+      root.availableModels = event.models || []
+      root.updateModelSelection(event.model)
       Qt.callLater(function() { if (root.opened) prompt.forceActiveFocus() })
+    } else if (event.type === "modelSelected") {
+      root.modelChangePending = false
+      root.updateModelSelection(event.model)
+      root.notice = "Ready"
+    } else if (event.type === "activeModel") {
+      root.modelIndicator = root.displayModelName(event.model)
     } else if (event.type === "delta") {
       root.appendDelta(event.itemId, event.delta)
     } else if (event.type === "message") {
@@ -349,6 +390,8 @@ Item {
       if (event.name === "first-token") root.lastFirstTokenMs = Number(event.durationMs)
       else if (event.name === "response") root.lastResponseMs = Number(event.durationMs)
     } else if (event.type === "error" || event.type === "fatal") {
+      root.modelChangePending = false
+      if (root.selectedModel) root.updateModelSelection(root.selectedModel)
       root.streamingId = ""
       root.thinking = false
       root.notice = String(event.message || "Something went wrong.")
@@ -450,13 +493,23 @@ Item {
             font.bold: true
           }
 
-          Text {
+          ComboBox {
+            id: modelChooser
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            text: "GPT 5.6 Luna  ·  low"
-            color: root.dim
+            width: Math.min(Style.space(220), parent.width * 0.48)
+            height: Style.space(30)
+            enabled: root.connected && !root.thinking && !root.modelChangePending && root.availableModels.length > 0
+            model: root.availableModels
+            textRole: "displayName"
+            valueRole: "model"
+            displayText: root.modelIndicator
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
+            onActivated: function(index) {
+              root.modelChangePending = true
+              root.sendCommand({type: "selectModel", model: root.availableModels[index].model})
+            }
           }
         }
 
@@ -704,7 +757,7 @@ Item {
           TextArea {
             id: prompt
             width: composer.availableWidth
-            enabled: root.connected && !root.thinking
+            enabled: root.connected && !root.thinking && !root.modelChangePending
             placeholderText: root.thinking ? "Press Esc to stop" : "Message ChatGPT"
             wrapMode: TextEdit.Wrap
             font.family: Style.font.family

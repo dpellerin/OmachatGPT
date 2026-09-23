@@ -8,11 +8,18 @@ import {friendlyError, loadState, messagesFromTurns, saveState, STATE_VERSION} f
 test("state round trips with private permissions", async () => {
   const root = await mkdtemp(join(tmpdir(), "omachatgpt-test-"));
   const path = join(root, "nested", "state.json");
-  await saveState("thread-123", path);
+  await saveState("thread-123", "gpt-6-luna", path);
   assert.equal((await loadState(path))?.threadId, "thread-123");
   assert.equal((await loadState(path))?.version, STATE_VERSION);
   assert.equal((await stat(path)).mode & 0o777, 0o600);
-  assert.match(await readFile(path, "utf8"), /gpt-5\.6-luna/);
+  assert.match(await readFile(path, "utf8"), /gpt-6-luna/);
+});
+
+test("state retains a selected model", async () => {
+  const root = await mkdtemp(join(tmpdir(), "omachatgpt-test-"));
+  const path = join(root, "state.json");
+  await saveState("thread-123", "gpt-6-sol", path);
+  assert.equal((await loadState(path))?.model, "gpt-6-sol");
 });
 
 test("invalid state is ignored", async () => {
@@ -26,7 +33,7 @@ test("older chat policy state is not resumed", async () => {
   await writeFile(path, JSON.stringify({
     version: 1,
     threadId: "old-thread",
-    model: "gpt-5.6-luna",
+    model: "gpt-6-luna",
     updatedAt: new Date().toISOString(),
   }));
   assert.equal(await loadState(path), null);

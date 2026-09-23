@@ -1,9 +1,8 @@
 import {mkdir} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {CHAT_INSTRUCTIONS, CHAT_PERSONALITY} from "../dist/client.js";
+import {CHAT_INSTRUCTIONS, CHAT_PERSONALITY, availableModels, defaultModel} from "../dist/client.js";
 import {JsonRpcProcess} from "../dist/protocol.js";
-import {MODEL} from "../dist/state.js";
 
 const rpc = new JsonRpcProcess();
 const runtimeDir = join(tmpdir(), `omachatgpt-smoke-${process.pid}`);
@@ -43,10 +42,11 @@ rpc.on("notification", (method, params) => {
 try {
   await rpc.start();
   const models = await rpc.request("model/list", {limit: 100, includeHidden: false});
-  if (!models.data.some((candidate) => candidate.model === MODEL)) throw new Error(`${MODEL} is unavailable.`);
+  const model = defaultModel(availableModels(models.data));
+  if (!model) throw new Error("No available model supports low reasoning effort.");
 
   const started = await rpc.request("thread/start", {
-    model: MODEL,
+    model,
     personality: CHAT_PERSONALITY,
     cwd: runtimeDir,
     approvalPolicy: "never",
@@ -63,7 +63,7 @@ try {
   await rpc.request("turn/start", {
     threadId: started.thread.id,
     input: [{type: "text", text: "Search the web for the current OpenAI developer documentation homepage title, then reply with the title and a Markdown source link."}],
-    model: MODEL,
+    model,
     personality: CHAT_PERSONALITY,
     effort: "low",
     serviceTierForTurn: "default",

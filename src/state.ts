@@ -4,7 +4,7 @@ import {homedir} from "node:os";
 import type {ChatMessage, PersistedState, ThreadItem, ThreadTurn} from "./types.js";
 import {citationSourcesFromResults, normalizeAssistantText, type CitationSource} from "./render.js";
 
-export const MODEL = "gpt-5.6-luna";
+export const DEFAULT_MODEL = "gpt-6-luna";
 export const STATE_VERSION = 3;
 
 export function statePath(env: NodeJS.ProcessEnv = process.env): string {
@@ -16,7 +16,7 @@ export async function loadState(path = statePath()): Promise<PersistedState | nu
   try {
     const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<PersistedState>;
     if (parsed.version !== STATE_VERSION || typeof parsed.threadId !== "string" || !parsed.threadId) return null;
-    if (parsed.model !== MODEL || typeof parsed.updatedAt !== "string") return null;
+    if (typeof parsed.model !== "string" || !parsed.model || typeof parsed.updatedAt !== "string") return null;
     return parsed as PersistedState;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -24,13 +24,13 @@ export async function loadState(path = statePath()): Promise<PersistedState | nu
   }
 }
 
-export async function saveState(threadId: string, path = statePath()): Promise<void> {
+export async function saveState(threadId: string, model: string, path = statePath()): Promise<void> {
   await mkdir(dirname(path), {recursive: true, mode: 0o700});
   const temporary = `${path}.${process.pid}.tmp`;
   const data: PersistedState = {
     version: STATE_VERSION,
     threadId,
-    model: MODEL,
+    model,
     updatedAt: new Date().toISOString(),
   };
   await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, {mode: 0o600});
@@ -71,8 +71,8 @@ export function friendlyError(error: unknown): string {
   if (/ENOENT.*codex|spawn codex ENOENT/i.test(message)) {
     return "Codex is not installed or is not on PATH. Update Omarchy, then reopen this popup.";
   }
-  if (/model.*unavailable|gpt-5\.6-luna/i.test(message)) {
-    return "GPT-5.6 Luna is not available to this account. Update Codex or review the available models.";
+  if (/model.*unavailable/i.test(message)) {
+    return "That model is not available to this account. Choose another model or update Codex.";
   }
   return message.replace(/\s+/g, " ").trim() || "Something went wrong.";
 }

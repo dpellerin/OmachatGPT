@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { citationSourcesFromResults, normalizeAssistantText } from "./render.js";
-export const MODEL = "gpt-5.6-luna";
+export const DEFAULT_MODEL = "gpt-6-luna";
 export const STATE_VERSION = 3;
 export function statePath(env = process.env) {
     const root = env.XDG_STATE_HOME || join(homedir(), ".local", "state");
@@ -13,7 +13,7 @@ export async function loadState(path = statePath()) {
         const parsed = JSON.parse(await readFile(path, "utf8"));
         if (parsed.version !== STATE_VERSION || typeof parsed.threadId !== "string" || !parsed.threadId)
             return null;
-        if (parsed.model !== MODEL || typeof parsed.updatedAt !== "string")
+        if (typeof parsed.model !== "string" || !parsed.model || typeof parsed.updatedAt !== "string")
             return null;
         return parsed;
     }
@@ -23,13 +23,13 @@ export async function loadState(path = statePath()) {
         return null;
     }
 }
-export async function saveState(threadId, path = statePath()) {
+export async function saveState(threadId, model, path = statePath()) {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     const temporary = `${path}.${process.pid}.tmp`;
     const data = {
         version: STATE_VERSION,
         threadId,
-        model: MODEL,
+        model,
         updatedAt: new Date().toISOString(),
     };
     await writeFile(temporary, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
@@ -67,8 +67,8 @@ export function friendlyError(error) {
     if (/ENOENT.*codex|spawn codex ENOENT/i.test(message)) {
         return "Codex is not installed or is not on PATH. Update Omarchy, then reopen this popup.";
     }
-    if (/model.*unavailable|gpt-5\.6-luna/i.test(message)) {
-        return "GPT-5.6 Luna is not available to this account. Update Codex or review the available models.";
+    if (/model.*unavailable/i.test(message)) {
+        return "That model is not available to this account. Choose another model or update Codex.";
     }
     return message.replace(/\s+/g, " ").trim() || "Something went wrong.";
 }

@@ -16,6 +16,8 @@ runtime npm dependencies.
 - Warm backend for immediate reopen during short breaks
 - Resumable conversation owned separately from normal Codex sessions
 - Live web search with clickable source links
+- Model chooser populated from the models available to your Codex login;
+  Luna is the initial default and your selection is remembered
 - Streaming prose with formatted links, lists, emphasis, code, and common math
 - Expandable multiline composer and one-click message or code copying
 - Deliberately no command execution, file access, plugins, skills, images, or
@@ -26,7 +28,7 @@ runtime npm dependencies.
 - Omarchy 4.0 or newer with Quattro shell plugin support
 - Node.js 20 or newer on `PATH`
 - A current Codex CLI with `app-server` support (tested with 0.152.1)
-- Access to the `gpt-5.6-luna` model
+- Access to a Codex model that supports low reasoning effort
 - A ChatGPT-authenticated Codex login (`codex login status`)
 
 Omarchy supplies the shell APIs and `omarchy-launch-browser` helper used by the
@@ -70,6 +72,11 @@ This does not remove Codex's separately managed conversation history. See
 - `Esc`: stop an active response, otherwise close the panel
 - `Ctrl+N`: start a new chat
 - `PageUp` / `PageDown`: scroll
+
+The model chooser is in the panel header. On first use, it selects GPT-6 Luna
+when available, otherwise another available Luna model. You can choose a
+different model between responses; the next message uses that model. A new chat
+keeps your selection.
 
 ## Scope and safety
 

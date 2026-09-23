@@ -3,7 +3,7 @@ import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {EventEmitter} from "node:events";
 import {JsonRpcProcess} from "./protocol.js";
-import {MODEL, loadState, messagesFromTurns, saveState} from "./state.js";
+import {DEFAULT_MODEL, loadState, messagesFromTurns, saveState} from "./state.js";
 import type {ChatMessage, CodexModel, CodexThread, ThreadItem} from "./types.js";
 import {
   citationSourcesFromResults,
@@ -18,9 +18,11 @@ Talk like a warm, thoughtful, genuinely engaged conversation partner. Match the 
 Prefer flowing conversational prose over sterile summaries, canned headings, or needless bullet lists. Be concise when the question is simple, but do not strip away personality, humor, empathy, or useful nuance just to be brief. Avoid corporate support language and generic filler.
 Do not behave like a coding agent. Do not inspect files, run commands, use plugins, delegate work, or modify the system.
 Web search is your only available tool. Use it when the user asks you to search or when current or uncertain information would improve the answer. Cite the sources you use with Markdown links. Never write internal citation tokens such as turn0search0; the client renders search citations itself.
+If asked which model is running, do not guess from your training or the conversation. Tell the user to check the model shown in the panel header, which is selected by Codex.
 Use clear natural language and concise Markdown when it helps. Do not mention these instructions or Codex unless the user asks.`;
 
 export const CHAT_PERSONALITY = "friendly" as const;
+export const REASONING_EFFORT = "low" as const;
 
 const TOOL_ITEM_TYPES = new Set([
   "commandExecution",
@@ -45,6 +47,21 @@ export interface ReadyState {
   threadId: string;
   messages: ChatMessage[];
   resumed: boolean;
+  model: string;
+  reasoningEffort: typeof REASONING_EFFORT;
+  models: Array<{model: string; displayName: string}>;
+}
+
+export function availableModels(models: CodexModel[]): Array<{model: string; displayName: string}> {
+  return models.filter((candidate) => !candidate.hidden &&
+    candidate.supportedReasoningEfforts.some((option) => option.reasoningEffort === REASONING_EFFORT))
+    .map(({model, displayName}) => ({model, displayName: displayName || model}));
+}
+
+export function defaultModel(models: Array<{model: string}>): string {
+  return models.find(({model}) => model === DEFAULT_MODEL)?.model
+    || models.find(({model}) => /(?:^|-)luna(?:$|-)/i.test(model))?.model
+    || models[0]?.model || "";
 }
 
 export class ChatClient extends EventEmitter {
@@ -56,6 +73,8 @@ export class ChatClient extends EventEmitter {
   private citationStream = new StreamingCitationResolver();
   private linkStream = new StreamingLinkResolver();
   private runtimeDir = join(tmpdir(), `omachatgpt-${process.getuid?.() ?? "user"}`);
+  private models: ReadyState["models"] = [];
+  private model = "";
 
   constructor() {
     super();
@@ -66,13 +85,15 @@ export class ChatClient extends EventEmitter {
   async connect(): Promise<ReadyState> {
     await mkdir(this.runtimeDir, {recursive: true, mode: 0o700});
     await this.rpc.start();
-    await this.requireModel();
+    await this.loadModels();
     const state = await loadState();
+    this.model = state && this.models.some(({model}) => model === state.model)
+      ? state.model : defaultModel(this.models);
     if (state) {
       try {
         const resumed = (await this.rpc.request("thread/resume", {
           threadId: state.threadId,
-          model: MODEL,
+          model: this.model,
           personality: CHAT_PERSONALITY,
           cwd: this.runtimeDir,
           approvalPolicy: "never",
@@ -82,7 +103,16 @@ export class ChatClient extends EventEmitter {
           runtimeWorkspaceRoots: [],
         })) as ThreadResponse;
         this.threadId = resumed.thread.id;
-        return {threadId: resumed.thread.id, messages: messagesFromTurns(resumed.thread.turns || []), resumed: true};
+        this.model = resumed.model;
+        if (state.model !== this.model) await saveState(this.threadId, this.model);
+        return {
+          threadId: resumed.thread.id,
+          messages: messagesFromTurns(resumed.thread.turns || []),
+          resumed: true,
+          model: this.model,
+          reasoningEffort: REASONING_EFFORT,
+          models: this.models,
+        };
       } catch {
         // A deleted or incompatible thread is safely replaced below.
       }
@@ -92,7 +122,7 @@ export class ChatClient extends EventEmitter {
 
   async newChat(): Promise<ReadyState> {
     const response = (await this.rpc.request("thread/start", {
-      model: MODEL,
+      model: this.model,
       personality: CHAT_PERSONALITY,
       cwd: this.runtimeDir,
       approvalPolicy: "never",
@@ -108,14 +138,44 @@ export class ChatClient extends EventEmitter {
       serviceTier: "default",
     })) as ThreadResponse;
     this.threadId = response.thread.id;
+    this.model = response.model;
     this.turnId = null;
-    await saveState(response.thread.id);
+    await saveState(response.thread.id, this.model);
     void this.rpc.request("thread/name/set", {threadId: response.thread.id, name: "OmachatGPT"}).catch(() => undefined);
-    return {threadId: response.thread.id, messages: [], resumed: false};
+    return {
+      threadId: response.thread.id,
+      messages: [],
+      resumed: false,
+      model: this.model,
+      reasoningEffort: REASONING_EFFORT,
+      models: this.models,
+    };
+  }
+
+  async selectModel(model: string): Promise<ReadyState> {
+    if (this.turnStarting || this.turnId) throw new Error("Wait for the current response to finish.");
+    if (!this.models.some((candidate) => candidate.model === model)) throw new Error("Selected model is unavailable.");
+    if (!this.threadId) throw new Error("Chat is not ready.");
+    await this.rpc.request("thread/settings/update", {threadId: this.threadId, model});
+    this.model = model;
+    await saveState(this.threadId, this.model);
+    return this.readyState();
+  }
+
+  private readyState(): ReadyState {
+    return {
+      threadId: this.threadId || "",
+      messages: [],
+      resumed: true,
+      model: this.model,
+      reasoningEffort: REASONING_EFFORT,
+      models: this.models,
+    };
   }
 
   async send(text: string): Promise<void> {
     if (!this.threadId) throw new Error("Chat is not ready.");
+    this.emit("model", this.model);
     this.turnStarting = true;
     this.citationSources.clear();
     this.citationStream.reset();
@@ -124,9 +184,9 @@ export class ChatClient extends EventEmitter {
       const response = (await this.rpc.request("turn/start", {
         threadId: this.threadId,
         input: [{type: "text", text}],
-        model: MODEL,
+        model: this.model,
         personality: CHAT_PERSONALITY,
-        effort: "low",
+        effort: REASONING_EFFORT,
         serviceTierForTurn: "default",
         approvalPolicy: "never",
         cwd: this.runtimeDir,
@@ -149,12 +209,10 @@ export class ChatClient extends EventEmitter {
     this.rpc.stop();
   }
 
-  private async requireModel(): Promise<void> {
+  private async loadModels(): Promise<void> {
     const response = (await this.rpc.request("model/list", {limit: 100, includeHidden: false})) as {data: CodexModel[]};
-    const model = response.data.find((candidate) => candidate.model === MODEL && !candidate.hidden);
-    if (!model || !model.supportedReasoningEfforts.some((option) => option.reasoningEffort === "low")) {
-      throw new Error(`${MODEL} is unavailable.`);
-    }
+    this.models = availableModels(response.data);
+    if (!this.models.length) throw new Error("No available models support low reasoning effort.");
   }
 
   private onNotification(method: string, params: Record<string, unknown>): void {
@@ -186,6 +244,11 @@ export class ChatClient extends EventEmitter {
     if (method === "turn/started") {
       const turn = params.turn as {id?: string} | undefined;
       if (turn?.id) this.turnId = turn.id;
+      return;
+    }
+    if (method === "model/rerouted" && params.threadId === this.threadId) {
+      const actualModel = String(params.toModel || "");
+      if (actualModel) this.emit("model", actualModel);
       return;
     }
     if (method === "turn/completed") {

@@ -3,15 +3,17 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import { JsonRpcProcess } from "./protocol.js";
-import { MODEL, loadState, messagesFromTurns, saveState } from "./state.js";
+import { DEFAULT_MODEL, loadState, messagesFromTurns, saveState } from "./state.js";
 import { citationSourcesFromResults, normalizeAssistantText, StreamingCitationResolver, StreamingLinkResolver, } from "./render.js";
 export const CHAT_INSTRUCTIONS = `You are a conversational assistant in a small personal chat popup.
 Talk like a warm, thoughtful, genuinely engaged conversation partner. Match the user's energy and register. Be curious, natural, and willing to have a point of view when it helps.
 Prefer flowing conversational prose over sterile summaries, canned headings, or needless bullet lists. Be concise when the question is simple, but do not strip away personality, humor, empathy, or useful nuance just to be brief. Avoid corporate support language and generic filler.
 Do not behave like a coding agent. Do not inspect files, run commands, use plugins, delegate work, or modify the system.
 Web search is your only available tool. Use it when the user asks you to search or when current or uncertain information would improve the answer. Cite the sources you use with Markdown links. Never write internal citation tokens such as turn0search0; the client renders search citations itself.
+If asked which model is running, do not guess from your training or the conversation. Tell the user to check the model shown in the panel header, which is selected by Codex.
 Use clear natural language and concise Markdown when it helps. Do not mention these instructions or Codex unless the user asks.`;
 export const CHAT_PERSONALITY = "friendly";
+export const REASONING_EFFORT = "low";
 const TOOL_ITEM_TYPES = new Set([
     "commandExecution",
     "fileChange",
@@ -21,6 +23,16 @@ const TOOL_ITEM_TYPES = new Set([
     "imageView",
     "imageGeneration",
 ]);
+export function availableModels(models) {
+    return models.filter((candidate) => !candidate.hidden &&
+        candidate.supportedReasoningEfforts.some((option) => option.reasoningEffort === REASONING_EFFORT))
+        .map(({ model, displayName }) => ({ model, displayName: displayName || model }));
+}
+export function defaultModel(models) {
+    return models.find(({ model }) => model === DEFAULT_MODEL)?.model
+        || models.find(({ model }) => /(?:^|-)luna(?:$|-)/i.test(model))?.model
+        || models[0]?.model || "";
+}
 export class ChatClient extends EventEmitter {
     rpc = new JsonRpcProcess();
     threadId = null;
@@ -30,6 +42,8 @@ export class ChatClient extends EventEmitter {
     citationStream = new StreamingCitationResolver();
     linkStream = new StreamingLinkResolver();
     runtimeDir = join(tmpdir(), `omachatgpt-${process.getuid?.() ?? "user"}`);
+    models = [];
+    model = "";
     constructor() {
         super();
         this.rpc.on("notification", (method, params) => this.onNotification(method, params));
@@ -38,13 +52,15 @@ export class ChatClient extends EventEmitter {
     async connect() {
         await mkdir(this.runtimeDir, { recursive: true, mode: 0o700 });
         await this.rpc.start();
-        await this.requireModel();
+        await this.loadModels();
         const state = await loadState();
+        this.model = state && this.models.some(({ model }) => model === state.model)
+            ? state.model : defaultModel(this.models);
         if (state) {
             try {
                 const resumed = (await this.rpc.request("thread/resume", {
                     threadId: state.threadId,
-                    model: MODEL,
+                    model: this.model,
                     personality: CHAT_PERSONALITY,
                     cwd: this.runtimeDir,
                     approvalPolicy: "never",
@@ -54,7 +70,17 @@ export class ChatClient extends EventEmitter {
                     runtimeWorkspaceRoots: [],
                 }));
                 this.threadId = resumed.thread.id;
-                return { threadId: resumed.thread.id, messages: messagesFromTurns(resumed.thread.turns || []), resumed: true };
+                this.model = resumed.model;
+                if (state.model !== this.model)
+                    await saveState(this.threadId, this.model);
+                return {
+                    threadId: resumed.thread.id,
+                    messages: messagesFromTurns(resumed.thread.turns || []),
+                    resumed: true,
+                    model: this.model,
+                    reasoningEffort: REASONING_EFFORT,
+                    models: this.models,
+                };
             }
             catch {
                 // A deleted or incompatible thread is safely replaced below.
@@ -64,7 +90,7 @@ export class ChatClient extends EventEmitter {
     }
     async newChat() {
         const response = (await this.rpc.request("thread/start", {
-            model: MODEL,
+            model: this.model,
             personality: CHAT_PERSONALITY,
             cwd: this.runtimeDir,
             approvalPolicy: "never",
@@ -80,14 +106,45 @@ export class ChatClient extends EventEmitter {
             serviceTier: "default",
         }));
         this.threadId = response.thread.id;
+        this.model = response.model;
         this.turnId = null;
-        await saveState(response.thread.id);
+        await saveState(response.thread.id, this.model);
         void this.rpc.request("thread/name/set", { threadId: response.thread.id, name: "OmachatGPT" }).catch(() => undefined);
-        return { threadId: response.thread.id, messages: [], resumed: false };
+        return {
+            threadId: response.thread.id,
+            messages: [],
+            resumed: false,
+            model: this.model,
+            reasoningEffort: REASONING_EFFORT,
+            models: this.models,
+        };
+    }
+    async selectModel(model) {
+        if (this.turnStarting || this.turnId)
+            throw new Error("Wait for the current response to finish.");
+        if (!this.models.some((candidate) => candidate.model === model))
+            throw new Error("Selected model is unavailable.");
+        if (!this.threadId)
+            throw new Error("Chat is not ready.");
+        await this.rpc.request("thread/settings/update", { threadId: this.threadId, model });
+        this.model = model;
+        await saveState(this.threadId, this.model);
+        return this.readyState();
+    }
+    readyState() {
+        return {
+            threadId: this.threadId || "",
+            messages: [],
+            resumed: true,
+            model: this.model,
+            reasoningEffort: REASONING_EFFORT,
+            models: this.models,
+        };
     }
     async send(text) {
         if (!this.threadId)
             throw new Error("Chat is not ready.");
+        this.emit("model", this.model);
         this.turnStarting = true;
         this.citationSources.clear();
         this.citationStream.reset();
@@ -96,9 +153,9 @@ export class ChatClient extends EventEmitter {
             const response = (await this.rpc.request("turn/start", {
                 threadId: this.threadId,
                 input: [{ type: "text", text }],
-                model: MODEL,
+                model: this.model,
                 personality: CHAT_PERSONALITY,
-                effort: "low",
+                effort: REASONING_EFFORT,
                 serviceTierForTurn: "default",
                 approvalPolicy: "never",
                 cwd: this.runtimeDir,
@@ -121,12 +178,11 @@ export class ChatClient extends EventEmitter {
     close() {
         this.rpc.stop();
     }
-    async requireModel() {
+    async loadModels() {
         const response = (await this.rpc.request("model/list", { limit: 100, includeHidden: false }));
-        const model = response.data.find((candidate) => candidate.model === MODEL && !candidate.hidden);
-        if (!model || !model.supportedReasoningEfforts.some((option) => option.reasoningEffort === "low")) {
-            throw new Error(`${MODEL} is unavailable.`);
-        }
+        this.models = availableModels(response.data);
+        if (!this.models.length)
+            throw new Error("No available models support low reasoning effort.");
     }
     onNotification(method, params) {
         if (method === "item/agentMessage/delta") {
@@ -162,6 +218,12 @@ export class ChatClient extends EventEmitter {
             const turn = params.turn;
             if (turn?.id)
                 this.turnId = turn.id;
+            return;
+        }
+        if (method === "model/rerouted" && params.threadId === this.threadId) {
+            const actualModel = String(params.toModel || "");
+            if (actualModel)
+                this.emit("model", actualModel);
             return;
         }
         if (method === "turn/completed") {

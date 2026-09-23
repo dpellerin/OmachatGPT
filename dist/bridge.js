@@ -49,6 +49,7 @@ client.on("done", () => {
     emit({ type: "done" });
 });
 client.on("searching", () => emit({ type: "searching" }));
+client.on("model", (model) => emit({ type: "activeModel", model }));
 client.on("error", (error) => {
     flushDelta();
     emit({ type: "error", message: friendlyError(error) });
@@ -69,7 +70,19 @@ async function handle(command) {
     }
     if (command.type === "newChat") {
         const ready = await client.newChat();
-        emit({ type: "ready", messages: ready.messages, notice: "New chat" });
+        emit({
+            type: "ready",
+            messages: ready.messages,
+            notice: "New chat",
+            model: ready.model,
+            reasoningEffort: ready.reasoningEffort,
+            models: ready.models,
+        });
+        return;
+    }
+    if (command.type === "selectModel") {
+        const ready = await client.selectModel(String(command.model || ""));
+        emit({ type: "modelSelected", model: ready.model });
         return;
     }
     if (command.type === "interrupt") {
@@ -116,6 +129,9 @@ try {
         type: "ready",
         messages: ready.messages,
         notice: ready.resumed && ready.messages.length ? "Resumed previous chat" : "Ready",
+        model: ready.model,
+        reasoningEffort: ready.reasoningEffort,
+        models: ready.models,
     });
 }
 catch (error) {
