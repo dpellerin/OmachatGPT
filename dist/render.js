@@ -106,6 +106,12 @@ export class StreamingLinkResolver {
             const start = bracket > 0 && input[bracket - 1] === "!" ? bracket - 1 : bracket;
             output += input.slice(0, start);
             const labelEnd = input.indexOf("]", bracket + 1);
+            const labelNewline = input.indexOf("\n", bracket + 1);
+            if (labelNewline >= 0 && (labelEnd < 0 || labelNewline < labelEnd)) {
+                output += input.slice(start, bracket + 1);
+                input = input.slice(bracket + 1);
+                continue;
+            }
             if (labelEnd < 0 || labelEnd + 1 >= input.length) {
                 this.tail = input.slice(start);
                 return output;
@@ -117,13 +123,23 @@ export class StreamingLinkResolver {
             }
             let depth = 0;
             let linkEnd = -1;
+            let linkNewline = false;
             for (let index = labelEnd + 1; index < input.length; index++) {
+                if (input[index] === "\n") {
+                    linkNewline = true;
+                    break;
+                }
                 if (input[index] === "(")
                     depth++;
                 else if (input[index] === ")" && --depth === 0) {
                     linkEnd = index;
                     break;
                 }
+            }
+            if (linkNewline) {
+                output += input.slice(start, labelEnd + 2);
+                input = input.slice(labelEnd + 2);
+                continue;
             }
             if (linkEnd < 0) {
                 this.tail = input.slice(start);
@@ -230,5 +246,20 @@ export function normalizeMath(markdown) {
     return value.replace(/\n{3,}/g, "\n\n").trim();
 }
 export function normalizeAssistantText(text, sources = []) {
-    return normalizeMath(resolveCitations(String(text || "").replace(/\r\n?/g, "\n"), sources));
+    const source = String(text || "").replace(/\r\n?/g, "\n");
+    const protectedCode = [];
+    // Protect complete/unfinished fences and inline code before prose normalization.
+    // Choose a sentinel absent from the input so literal model output cannot collide.
+    let sentinel = "\uE000OMACHATGPT_CODE_";
+    while (source.includes(sentinel))
+        sentinel += "_";
+    const prose = source.replace(/(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n\2[^\n]*(?=\n|$)|$)|(`+)[^`\n]*?\3/g, (code) => {
+        const index = protectedCode.push(code) - 1;
+        return `${sentinel}${index}\uE001`;
+    });
+    let normalized = normalizeMath(resolveCitations(prose, sources));
+    for (let index = 0; index < protectedCode.length; index++) {
+        normalized = normalized.replace(`${sentinel}${index}\uE001`, () => protectedCode[index]);
+    }
+    return normalized;
 }

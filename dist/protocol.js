@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { resolveExecutable, safeEnvironment } from "./runtime.js";
 export const DISABLED_FEATURES = [
     "shell_tool",
     "unified_exec",
@@ -15,11 +16,26 @@ export const DISABLED_FEATURES = [
     "multi_agent",
     "goals",
     "skill_search",
+    "hooks",
+    "code_mode",
+    "sleep_tool",
+    "skill_mcp_dependency_install",
+    "remote_plugin",
+    "workspace_dependencies",
+    "in_app_local_automation",
+    "realtime_conversation",
+    "multi_agent_v2",
+    "browser_annotation_api",
+    "in_app_browser",
+    "tool_suggest",
+    "auth_elicitation",
 ];
 export function codexArguments() {
     const args = ["app-server", "--stdio"];
     for (const feature of DISABLED_FEATURES)
         args.push("--disable", feature);
+    args.push("--enable", "skip_host_skill_discovery", "-c", 'forced_login_method="chatgpt"', "-c", 'model_provider="openai"', "-c", "analytics.enabled=false");
+    args.push("--enable", "standalone_web_search");
     args.push("-c", "mcp_servers={}", "-c", 'web_search="live"');
     return args;
 }
@@ -28,10 +44,14 @@ export class JsonRpcProcess extends EventEmitter {
     nextId = 1;
     pending = new Map();
     stderr = "";
-    async start() {
+    async start(cwd) {
         if (this.child)
             return;
-        const child = spawn("codex", codexArguments(), { stdio: "pipe" });
+        const child = spawn(resolveExecutable("codex"), codexArguments(), {
+            stdio: "pipe",
+            cwd,
+            env: safeEnvironment(),
+        });
         this.child = child;
         child.stderr.on("data", (chunk) => {
             this.stderr = `${this.stderr}${chunk.toString("utf8")}`.slice(-4000);
@@ -46,7 +66,7 @@ export class JsonRpcProcess extends EventEmitter {
         const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
         lines.on("line", (line) => this.receiveLine(line));
         await this.request("initialize", {
-            clientInfo: { name: "omachatgpt", title: "OmachatGPT", version: "0.2.2" },
+            clientInfo: { name: "omachatgpt", title: "OmachatGPT", version: "0.3.0" },
             capabilities: { experimentalApi: true },
         });
         this.notify("initialized", {});
@@ -67,9 +87,20 @@ export class JsonRpcProcess extends EventEmitter {
     notify(method, params) {
         this.write({ method, params });
     }
-    stop() {
-        this.child?.kill("SIGTERM");
+    async stop() {
+        const child = this.child;
         this.child = null;
+        this.failAll(new Error("Codex app-server stopped."));
+        if (!child || !child.pid || child.exitCode !== null)
+            return;
+        await new Promise((resolve) => {
+            const timer = setTimeout(() => child.kill("SIGKILL"), 1500);
+            child.once("exit", () => {
+                clearTimeout(timer);
+                resolve();
+            });
+            child.kill("SIGTERM");
+        });
     }
     write(message) {
         this.child?.stdin.write(`${JSON.stringify(message)}\n`);
@@ -80,6 +111,14 @@ export class JsonRpcProcess extends EventEmitter {
             message = JSON.parse(line);
         }
         catch {
+            return;
+        }
+        if (message.method && message.id !== undefined) {
+            this.write({
+                id: message.id,
+                error: { code: -32601, message: "OmachatGPT does not permit client tools or local actions." },
+            });
+            this.emit("notification", "omachatgpt/blockedRequest", { method: message.method });
             return;
         }
         if (typeof message.id === "number") {

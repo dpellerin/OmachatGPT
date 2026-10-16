@@ -2,13 +2,24 @@
   "schemaVersion": 1,
   "id": "dpellerin.omachatgpt",
   "name": "OmachatGPT",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "author": "Dana Pellerin",
   "license": "MIT",
-  "description": "A focused conversational ChatGPT panel with resumable history and live web search.",
-  "kinds": ["panel"],
+  "description": "A focused conversational ChatGPT and OpenRouter panel with resumable history, live web search, and a status bar icon.",
+  "kinds": [
+    "panel",
+    "bar-widget"
+  ],
   "keepLoaded": true,
   "entryPoints": {
-    "panel": "Panel.qml"
+    "panel": "Panel.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmachatGPT",
+    "description": "Pull-down menu for OmachatGPT (Open Chat, New Chat, Settings).",
+    "category": "AI",
+    "defaultSection": "right",
+    "allowMultiple": false
   }
 }

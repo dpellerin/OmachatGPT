@@ -1,4 +1,11 @@
 export type Role = "user" | "assistant";
+export type ModelProvider = "openai" | "openrouter";
+
+export interface ModelOption {
+  model: string;
+  displayName: string;
+  provider?: ModelProvider;
+}
 
 export interface ChatMessage {
   id: string;
@@ -11,6 +18,8 @@ export interface PersistedState {
   threadId: string;
   model: string;
   updatedAt: string;
+  messages?: ChatMessage[];
+  codexSyncedCount?: number;
 }
 
 export interface JsonRpcError {
@@ -20,7 +29,7 @@ export interface JsonRpcError {
 }
 
 export interface JsonRpcMessage {
-  id?: number;
+  id?: number | string;
   method?: string;
   params?: Record<string, unknown>;
   result?: unknown;

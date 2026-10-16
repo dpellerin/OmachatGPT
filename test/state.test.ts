@@ -8,9 +8,12 @@ import {friendlyError, loadState, messagesFromTurns, saveState, STATE_VERSION} f
 test("state round trips with private permissions", async () => {
   const root = await mkdtemp(join(tmpdir(), "omachatgpt-test-"));
   const path = join(root, "nested", "state.json");
-  await saveState("thread-123", "gpt-6-luna", path);
-  assert.equal((await loadState(path))?.threadId, "thread-123");
-  assert.equal((await loadState(path))?.version, STATE_VERSION);
+  await saveState("thread-123", "gpt-6-luna", path, [{id: "m1", role: "user", text: "Hi"}], 1);
+  const loaded = await loadState(path);
+  assert.equal(loaded?.threadId, "thread-123");
+  assert.equal(loaded?.version, STATE_VERSION);
+  assert.deepEqual(loaded?.messages, [{id: "m1", role: "user", text: "Hi"}]);
+  assert.equal(loaded?.codexSyncedCount, 1);
   assert.equal((await stat(path)).mode & 0o777, 0o600);
   assert.match(await readFile(path, "utf8"), /gpt-6-luna/);
 });

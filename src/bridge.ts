@@ -8,6 +8,9 @@ type BridgeCommand =
   | {type: "send"; text?: string}
   | {type: "newChat"}
   | {type: "selectModel"; model?: string}
+  | {type: "reloadConfig"}
+  | {type: "saveOpenRouterConfig"; key?: string; models?: Array<{model: string; displayName?: string}> | string}
+  | {type: "saveShortcut"; shortcut?: string}
   | {type: "interrupt"}
   | {type: "close"};
 
@@ -59,7 +62,7 @@ client.on("searching", () => emit({type: "searching"}));
 client.on("model", (model: string) => emit({type: "activeModel", model}));
 client.on("error", (error: Error) => {
   flushDelta();
-  emit({type: "error", message: friendlyError(error)});
+  emit({type: "error", message: friendlyError(error), busy: client.busy});
 });
 client.on("fatal", (error: Error) => {
   flushDelta();
@@ -85,6 +88,12 @@ async function handle(command: BridgeCommand): Promise<void> {
       model: ready.model,
       reasoningEffort: ready.reasoningEffort,
       models: ready.models,
+      openRouterConfigured: ready.openRouterConfigured,
+      openRouterKey: ready.openRouterKey,
+      openRouterModels: ready.openRouterModels,
+      defaultOpenRouterModels: ready.defaultOpenRouterModels,
+      shortcutBind: ready.shortcutBind,
+      shortcutLabel: ready.shortcutLabel,
     });
     return;
   }
@@ -93,21 +102,64 @@ async function handle(command: BridgeCommand): Promise<void> {
     emit({type: "modelSelected", model: ready.model});
     return;
   }
+  if (command.type === "reloadConfig") {
+    const ready = await client.reloadOpenRouter();
+    emit({
+      type: "modelsUpdated",
+      model: ready.model,
+      models: ready.models,
+      openRouterConfigured: ready.openRouterConfigured,
+      openRouterKey: ready.openRouterKey,
+      openRouterModels: ready.openRouterModels,
+      defaultOpenRouterModels: ready.defaultOpenRouterModels,
+      shortcutBind: ready.shortcutBind,
+      shortcutLabel: ready.shortcutLabel,
+    });
+    return;
+  }
+  if (command.type === "saveOpenRouterConfig") {
+    const ready = await client.saveOpenRouterSettings(String(command.key || ""), command.models);
+    emit({
+      type: "modelsUpdated",
+      model: ready.model,
+      models: ready.models,
+      openRouterConfigured: ready.openRouterConfigured,
+      openRouterKey: ready.openRouterKey,
+      openRouterModels: ready.openRouterModels,
+      defaultOpenRouterModels: ready.defaultOpenRouterModels,
+      shortcutBind: ready.shortcutBind,
+      shortcutLabel: ready.shortcutLabel,
+    });
+    return;
+  }
+  if (command.type === "saveShortcut") {
+    const ready = await client.saveShortcut(String(command.shortcut || ""));
+    emit({
+      type: "shortcutUpdated",
+      shortcutBind: ready.shortcutBind,
+      shortcutLabel: ready.shortcutLabel,
+    });
+    return;
+  }
   if (command.type === "interrupt") {
     await client.interrupt();
     return;
   }
-  if (command.type === "close") shutdown("command");
+  if (command.type === "close") await shutdown("command");
 }
 
-function shutdown(reason: string): void {
+let closing = false;
+async function shutdown(reason: string): Promise<void> {
+  if (closing) return;
+  closing = true;
   flushDelta();
   if (process.env.OMACHATGPT_DEBUG) process.stderr.write(`bridge shutdown: ${reason}\n`);
-  client.close();
+  await client.close();
   process.exit(0);
 }
 
 const input = createInterface({input: process.stdin, crlfDelay: Infinity});
+input.on("close", () => void shutdown("stdin EOF"));
 input.on("line", (line) => {
   let command: BridgeCommand;
   try {
@@ -117,18 +169,18 @@ input.on("line", (line) => {
     return;
   }
   void handle(command).catch((error: unknown) => {
-    emit({type: "error", message: friendlyError(error)});
+    emit({type: "error", message: friendlyError(error), busy: client.busy});
   });
 });
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("uncaughtException", (error) => {
   emit({type: "fatal", message: friendlyError(error)});
-  shutdown("uncaughtException");
+  void shutdown("uncaughtException");
 });
 process.on("unhandledRejection", (error) => {
   emit({type: "fatal", message: friendlyError(error)});
-  shutdown("unhandledRejection");
+  void shutdown("unhandledRejection");
 });
 
 try {
@@ -140,7 +192,23 @@ try {
     model: ready.model,
     reasoningEffort: ready.reasoningEffort,
     models: ready.models,
+    openRouterConfigured: ready.openRouterConfigured,
+    openRouterKey: ready.openRouterKey,
+    openRouterModels: ready.openRouterModels,
+    defaultOpenRouterModels: ready.defaultOpenRouterModels,
+    shortcutBind: ready.shortcutBind,
+    shortcutLabel: ready.shortcutLabel,
   });
 } catch (error) {
-  emit({type: "fatal", message: friendlyError(error)});
+  const settings = client.getOpenRouterSettings();
+  emit({
+    type: "fatal",
+    message: friendlyError(error),
+    openRouterConfigured: settings.openRouterConfigured,
+    openRouterKey: settings.openRouterKey,
+    openRouterModels: settings.openRouterModels,
+    defaultOpenRouterModels: settings.defaultOpenRouterModels,
+    shortcutBind: settings.shortcutBind,
+    shortcutLabel: settings.shortcutLabel,
+  });
 }

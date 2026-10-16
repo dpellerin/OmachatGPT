@@ -27,7 +27,9 @@ rpc.on("notification", (method, params) => {
   if (method === "item/started") {
     const type = params.item?.type;
     if (type === "webSearch") webSearchSeen = true;
-    else if (type && !["userMessage", "agentMessage", "reasoning"].includes(type)) unexpectedToolEvent = type;
+    else if (type && !["userMessage", "agentMessage", "reasoning", "contextCompaction"].includes(type)) {
+      unexpectedToolEvent = type;
+    }
   }
   if (method === "item/completed" && params.item?.type === "webSearch") {
     webSearchItems.push(params.item);
@@ -40,7 +42,7 @@ rpc.on("notification", (method, params) => {
 });
 
 try {
-  await rpc.start();
+  await rpc.start(runtimeDir);
   const models = await rpc.request("model/list", {limit: 100, includeHidden: false});
   const model = defaultModel(availableModels(models.data));
   if (!model) throw new Error("No available model supports low reasoning effort.");
@@ -51,6 +53,7 @@ try {
     cwd: runtimeDir,
     approvalPolicy: "never",
     sandbox: "read-only",
+    config: {web_search: "live"},
     baseInstructions: CHAT_INSTRUCTIONS,
     developerInstructions: CHAT_INSTRUCTIONS,
     dynamicTools: [],
@@ -81,5 +84,5 @@ try {
   }
   process.stdout.write(`Live response: ${output.trim()}\n`);
 } finally {
-  rpc.stop();
+  await rpc.stop();
 }
