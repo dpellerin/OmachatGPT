@@ -2155,7 +2155,7 @@ Item {
                 else if (root.thinking) root.interrupt()
                 else root.dismiss()
                 event.accepted = true
-              } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_N) {
+              } else if ((event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)) && event.key === Qt.Key_N) {
                 root.newChat()
                 event.accepted = true
               } else if ((event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_Comma) {
@@ -2181,7 +2181,7 @@ Item {
           width: parent.width
           text: root.settingsOpen
             ? "Enter save/add  ·  Esc back to chat"
-            : "Enter send  ·  Shift+Enter newline  ·  Ctrl+N new  ·  Ctrl+, settings  ·  Esc close"
+            : "Enter send  ·  Shift+Enter newline  ·  Super+N new chat  ·  Ctrl+, settings  ·  Esc close"
           color: root.dim
           horizontalAlignment: Text.AlignHCenter
           font.family: Style.font.family

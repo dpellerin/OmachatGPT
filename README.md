@@ -103,7 +103,8 @@ rmdir "${XDG_STATE_HOME:-$HOME/.local/state}/omachatgpt" 2>/dev/null || true
 - `Enter`: send
 - `Shift+Enter`: insert a newline
 - `Esc`: close open popup/settings, stop an active response, or close the panel
-- `Ctrl+N`: start a new chat (keeps selected model)
+- `Super+N`: start a new chat while the chat composer has focus
+  (keeps selected model; app-only, not a global Hyprland shortcut)
 - `Ctrl+,`: toggle Settings
 - `PageUp` / `PageDown`: scroll
 - **Bar Icon**: Opens a pull-down menu for **Open Chat / Hide Chat**, **New

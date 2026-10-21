@@ -30,7 +30,7 @@ BarWidget {
       action: "newChat",
       icon: "󰐕",
       label: "New Chat",
-      shortcut: "Ctrl+N"
+      shortcut: "Super+N"
     },
     {
       action: "settings",
