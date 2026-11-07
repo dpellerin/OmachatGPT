@@ -1,12 +1,13 @@
 version: 2
+# Security-only: disable routine version PRs; security updates remain enabled.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
